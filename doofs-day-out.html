@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Doofs Day Out</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#1A1206;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:'Press Start 2P',monospace;overflow:hidden}
+  #hud{display:flex;justify-content:space-between;align-items:center;width:864px;padding:10px 8px;color:#FFD700;font-size:12px}
+  #hud span{text-shadow:2px 2px 0 #1B5E20}
+  .title-text{font-size:14px;color:#A5D6A7}
+  canvas{border:3px solid #2E7D32;box-shadow:0 0 40px rgba(46,125,50,0.4);image-rendering:pixelated;image-rendering:crisp-edges}
+  #overlay{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:10;pointer-events:none}
+  #overlay.active{pointer-events:all;background:rgba(10,20,5,0.6)}
+  #oC{text-align:center;display:none}
+  #oC.show{display:block}
+  #oC h1{color:#FFD700;font-size:30px;text-shadow:3px 3px 0 #1B5E20;margin-bottom:14px}
+  #oC .sub{color:#A5D6A7;font-size:10px;margin-bottom:20px;line-height:2.2}
+  #oC .ctrl{color:#999;font-size:8px;line-height:2.4;margin-bottom:20px}
+  #oC .blink{color:#FFAA00;font-size:12px;animation:bl .8s step-end infinite}
+  #oC .result{color:#FFD700;font-size:18px;text-shadow:2px 2px 0 #1B5E20;line-height:2;white-space:pre-line}
+  @keyframes bl{0%,49%{opacity:1}50%,100%{opacity:0}}
+  #titlePug{width:160px;image-rendering:pixelated;image-rendering:crisp-edges;margin:10px auto;display:block;filter:drop-shadow(0 0 14px rgba(255,170,0,0.5))}
+</style>
+</head>
+<body>
+<div id="hud">
+  <span>SCORE <span id="score">0</span></span>
+  <span class="title-text">DOOFS DAY OUT</span>
+  <span>LIVES <span id="lives">3</span></span>
+</div>
+<canvas id="game"></canvas>
+<div id="overlay" class="active">
+  <div id="oC" class="show">
+    <h1>DOOFS DAY OUT</h1>
+    <img id="titlePug" src="BigPug.png" alt="Pug">
+    <div class="sub">Help the hungry pug explore the park!<br>Eat all the kibble!<br>Watch out for wasps!</div>
+    <div class="ctrl">ARROW KEYS / WASD to move</div>
+    <div class="blink">PRESS ENTER TO START</div>
+    <div style="color:#555;font-size:7px;margin-top:20px">v1.0 — PARK EDITION</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const T = 24;
+const COLS = 36, ROWS = 25;
+canvas.width = COLS*T; canvas.height = ROWS*T;
+document.getElementById('hud').style.width = canvas.width+'px';
+const bigPugImg = new Image();
+bigPugImg.src = 'BigPug.png';
+const fountainImg = new Image();
+fountainImg.src = 'Pug fountain2.png';
+
+// ════════════ AUDIO ════════════
+let aC;
+function aOn(){if(!aC)aC=new(window.AudioContext||window.webkitAudioContext)()}
+function tone(f,d,tp='square',v=.07){aOn();const t=aC.currentTime,o=aC.createOscillator(),g=aC.createGain();o.type=tp;o.frequency.value=f;g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(g);g.connect(aC.destination);o.start(t);o.stop(t+d)}
+function sfxChomp(){tone(440,.05);tone(550,.05)}
+function sfxPower(){tone(260,.12,'sawtooth',.1);tone(520,.18,'sawtooth',.1)}
+function sfxDeath(){[400,340,280,220,170,130].forEach((f,i)=>setTimeout(()=>tone(f,.14,'sawtooth',.11),i*75))}
+function sfxWin(){[523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,.18,'square',.1),i*140))}
+function sfxEat(){tone(880,.12);tone(1100,.12)}
+function sfxPugtato(){
+  // Triumphant fanfare!
+  [262,330,392,523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,.12,'square',.12),i*50));
+  setTimeout(()=>{tone(80,.2,'sawtooth',.15)},0);
+  setTimeout(()=>{tone(80,.2,'sawtooth',.15)},100);
+  setTimeout(()=>{tone(120,.3,'sawtooth',.12)},200);
+}
+
+// ════════════ PUGTATO MUSIC (disabled for Doofs Day Out) ════════════
+function startPugMusic(){}
+function stopPugMusic(){}
+
+// ════════════ MAP ════════════
+const MAP=[
+[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,0,1,1,0,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,0,1,1,0,1,1,1,1,0,1],
+[1,3,1,1,1,1,0,1,1,0,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,0,1,1,0,1,1,1,1,3,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,0,1,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1,1,0,1,1,0,1,1,1,1,0,1],
+[1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1],
+[1,1,1,1,1,1,0,1,1,1,1,1,2,1,1,2,2,1,1,2,2,1,1,2,1,1,1,1,1,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,2,2,2,2,2,2,2,1,1,4,4,4,4,1,1,2,2,2,2,2,2,2,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,2,2,2,2,1,2,2,2,2,2,2,2,2,1,2,2,2,2,1,1,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,2,2,2,1,2,2,2,2,2,2,2,2,2,2,1,2,2,2,1,1,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,2,2,2,2,1,2,2,2,2,2,2,2,2,1,2,2,2,2,1,1,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,2,2,2,2,2,1,1,1,1,1,1,1,1,2,2,2,2,2,1,1,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,0,1,1,1,1,1,1],
+[1,1,1,1,1,1,0,1,1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,0,1,1,1,1,1,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,0,1,1,1,0,1,1,1,1,1,0,1,1,0,1,1,1,1,1,0,1,1,1,0,1,1,1,1,0,1],
+[1,3,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,3,1],
+[1,1,1,0,1,1,0,1,1,0,1,1,1,0,1,1,1,1,1,1,1,1,0,1,1,1,0,1,1,0,1,1,0,1,1,1],
+[1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1],
+[1,0,1,1,1,1,1,1,1,1,1,1,0,1,1,1,0,1,1,0,1,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1],
+[1,0,1,1,1,1,1,1,1,1,1,1,0,1,1,1,0,1,1,0,1,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1],
+[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]];
+
+// ════════════ HELPERS ════════════
+function mkC(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c}
+function flipH(src){const c=mkC(src.width,src.height),g=c.getContext('2d');g.translate(src.width,0);g.scale(-1,1);g.drawImage(src,0,0);return c}
+
+// Pixelation: scale down then back up with no smoothing for chunky pixel look
+function pixelate(src,block=2){
+  const w=src.width,h=src.height;
+  const sm=mkC(w/block,h/block),sg=sm.getContext('2d');
+  sg.imageSmoothingEnabled=false;sg.drawImage(src,0,0,w/block,h/block);
+  const out=mkC(w,h),og=out.getContext('2d');
+  og.imageSmoothingEnabled=false;og.drawImage(sm,0,0,w,h);
+  return out;
+}
+
+// ════════════ PUG SPRITES (matching reference: googly eyes, thick outlines, chunky pixel style) ════════════
+// Colors from reference
+const TAN='#D4B880', TAN_DK='#B89860', TAN_LT='#E0CCA0', BLK='#1A1A1A', WHT='#FFFFFF', RED='#DD3333';
+
+function drawPugSide(legPhase, isDead) {
+  const S=32, c=mkC(S,S), g=c.getContext('2d');
+
+  // ─── TAIL (curly, back) ───
+  g.strokeStyle=BLK; g.lineWidth=3;
+  g.beginPath(); g.arc(4,10,4,0,Math.PI*.8); g.stroke();
+  g.strokeStyle=TAN; g.lineWidth=1.8;
+  g.beginPath(); g.arc(4,10,4,0,Math.PI*.8); g.stroke();
+
+  // ─── BODY (chunky oval with thick outline) ───
+  g.fillStyle=BLK;
+  g.beginPath(); g.ellipse(15,17,11,8.5,0,0,Math.PI*2); g.fill();
+  g.fillStyle=TAN;
+  g.beginPath(); g.ellipse(15,17,9,6.5,0,0,Math.PI*2); g.fill();
+  // Belly (slightly darker)
+  g.fillStyle=TAN_DK;
+  g.beginPath(); g.ellipse(15,20,6,3,0,0,Math.PI*2); g.fill();
+
+  // ─── LEGS (stubby, thick black outline, animated) ───
+  let positions;
+  if(isDead) {
+    positions = [{x:10,h:4},{x:20,h:4},{x:12,h:3},{x:22,h:3}]; // splayed
+  } else {
+    const a = legPhase * Math.PI * 2;
+    // Back legs
+    const bl1 = 10 + Math.sin(a)*3;
+    const bl2 = 12 + Math.sin(a+Math.PI)*3;
+    // Front legs
+    const fl1 = 19 + Math.sin(a+Math.PI)*3;
+    const fl2 = 21 + Math.sin(a)*3;
+    positions = [
+      {x:bl1, h:7, back:true}, {x:bl2, h:7, back:true},
+      {x:fl1, h:7}, {x:fl2, h:7}
+    ];
+  }
+
+  // Draw back legs first (darker)
+  positions.filter(p=>p.back).forEach(p=>{
+    g.fillStyle=BLK;
+    g.fillRect(p.x-2.5, 22, 5, p.h+1);
+    g.fillStyle=TAN_DK;
+    g.fillRect(p.x-1.5, 22.5, 3, p.h-1);
+    // Paw
+    g.fillStyle=BLK;
+    g.beginPath(); g.ellipse(p.x, 22+p.h, 3, 2, 0, 0, Math.PI*2); g.fill();
+    g.fillStyle=TAN_DK;
+    g.beginPath(); g.ellipse(p.x, 22+p.h, 2, 1.3, 0, 0, Math.PI*2); g.fill();
+  });
+
+  // Re-draw body over back legs
+  g.fillStyle=BLK;
+  g.beginPath(); g.ellipse(15,17,11,8.5,0,0,Math.PI*2); g.fill();
+  g.fillStyle=TAN;
+  g.beginPath(); g.ellipse(15,17,9,6.5,0,0,Math.PI*2); g.fill();
+  g.fillStyle=TAN_DK;
+  g.beginPath(); g.ellipse(15,20,6,3,0,0,Math.PI*2); g.fill();
+
+  // Draw front legs (brighter, on top)
+  positions.filter(p=>!p.back).forEach(p=>{
+    g.fillStyle=BLK;
+    g.fillRect(p.x-2.5, 22, 5, (p.h||4)+1);
+    g.fillStyle=TAN;
+    g.fillRect(p.x-1.5, 22.5, 3, (p.h||4)-1);
+    g.fillStyle=BLK;
+    g.beginPath(); g.ellipse(p.x, 22+(p.h||4), 3, 2, 0, 0, Math.PI*2); g.fill();
+    g.fillStyle=TAN_LT;
+    g.beginPath(); g.ellipse(p.x, 22+(p.h||4), 2, 1.3, 0, 0, Math.PI*2); g.fill();
+  });
+
+  // ─── HEAD (big, round, ~40% of sprite) ───
+  const hx=23, hy=9;
+
+  // Ear (dark gray floppy, on top-back — visible against dark bg)
+  g.fillStyle='#555';
+  g.beginPath(); g.ellipse(hx-1, hy-6, 5, 4.5, -.3, 0, Math.PI*2); g.fill();
+
+  // Head circle with thick outline
+  g.fillStyle=BLK;
+  g.beginPath(); g.ellipse(hx, hy, 9.5, 9, 0, 0, Math.PI*2); g.fill();
+  g.fillStyle=TAN;
+  g.beginPath(); g.ellipse(hx, hy, 7.5, 7, 0, 0, Math.PI*2); g.fill();
+
+  // Black muzzle/face mask (key pug feature from reference)
+  g.fillStyle=BLK;
+  g.beginPath(); g.ellipse(hx+2, hy+2, 5, 4.5, 0, 0, Math.PI*2); g.fill();
+
+  if(isDead) {
+    // X eyes
+    g.strokeStyle=WHT; g.lineWidth=2;
+    [[hx-2,hy-2],[hx+3,hy-2]].forEach(([ex,ey])=>{
+      g.beginPath();g.moveTo(ex-2,ey-2);g.lineTo(ex+2,ey+2);g.stroke();
+      g.beginPath();g.moveTo(ex+2,ey-2);g.lineTo(ex-2,ey+2);g.stroke();
+    });
+    // Tongue hanging way out
+    g.fillStyle=RED;
+    g.beginPath(); g.ellipse(hx+4,hy+7,2.5,4,.2,0,Math.PI*2); g.fill();
+    g.fillStyle='#FF6666';
+    g.beginPath(); g.ellipse(hx+4,hy+6,1.5,2,.2,0,Math.PI*2); g.fill();
+  } else {
+    // ─── HUGE GOOGLY EYES (signature style from reference!) ───
+    // Left eye (big white circle)
+    g.fillStyle=WHT;
+    g.beginPath(); g.ellipse(hx-2, hy-2, 4, 4.5, 0, 0, Math.PI*2); g.fill();
+    // Right eye
+    g.fillStyle=WHT;
+    g.beginPath(); g.ellipse(hx+4, hy-2, 3.5, 4, 0, 0, Math.PI*2); g.fill();
+    // Black outlines around eyes
+    g.strokeStyle=BLK; g.lineWidth=1;
+    g.beginPath(); g.ellipse(hx-2, hy-2, 4, 4.5, 0, 0, Math.PI*2); g.stroke();
+    g.beginPath(); g.ellipse(hx+4, hy-2, 3.5, 4, 0, 0, Math.PI*2); g.stroke();
+    // Pupils (black dots, slightly to the right — looking forward)
+    g.fillStyle=BLK;
+    g.beginPath(); g.arc(hx-0.5, hy-1.5, 2, 0, Math.PI*2); g.fill();
+    g.beginPath(); g.arc(hx+5.5, hy-1.5, 1.8, 0, Math.PI*2); g.fill();
+    // Eye shine (tiny white dot)
+    g.fillStyle=WHT;
+    g.beginPath(); g.arc(hx-1.5, hy-3, .8, 0, Math.PI*2); g.fill();
+    g.beginPath(); g.arc(hx+4.5, hy-3, .7, 0, Math.PI*2); g.fill();
+
+    // Nose (small dot on muzzle)
+    g.fillStyle='#333';
+    g.beginPath(); g.ellipse(hx+5.5, hy+1, 1.5, 1.2, 0, 0, Math.PI*2); g.fill();
+
+    // Tongue on eating frames
+    if(legPhase > 0.2 && legPhase < 0.7) {
+      g.fillStyle=RED;
+      g.beginPath(); g.ellipse(hx+4, hy+5.5, 2, 2.5, .15, 0, Math.PI*2); g.fill();
+    }
+  }
+
+  return c;
+}
+
+// Build all pug frames: 4 walk × 2 dirs + dead × 2 dirs + pugtato
+const pugF={r:[],l:[],deadR:null,deadL:null,tato:null};
+function buildPug(){
+  for(let i=0;i<4;i++){
+    pugF.r[i]=drawPugSide(i/4,false);
+    pugF.l[i]=flipH(pugF.r[i]);
+  }
+  pugF.deadR=drawPugSide(0,true);
+  pugF.deadL=flipH(pugF.deadR);
+  pugF.tato=drawPugtato();
+}
+
+// ════════════ PUGTATO SPRITE (round potato pug from reference) ════════════
+function drawPugtato(){
+  const S=32, c=mkC(S,S), g=c.getContext('2d');
+  // Round potato body — thick dark outline
+  g.fillStyle='#3A2A10';
+  g.beginPath(); g.arc(16,16,14,0,Math.PI*2); g.fill();
+  g.fillStyle='#C4A862';
+  g.beginPath(); g.arc(16,16,12,0,Math.PI*2); g.fill();
+  // Potato texture spots
+  g.fillStyle='#B09850';
+  g.beginPath();g.arc(7,12,1.5,0,Math.PI*2);g.fill();
+  g.beginPath();g.arc(24,18,1.2,0,Math.PI*2);g.fill();
+  g.beginPath();g.arc(11,24,1,0,Math.PI*2);g.fill();
+  g.beginPath();g.arc(20,8,1,0,Math.PI*2);g.fill();
+  // Dark floppy ear
+  g.fillStyle='#5C4020';
+  g.beginPath(); g.ellipse(23,7,4.5,3.5,0.3,0,Math.PI*2); g.fill();
+  // Dark muzzle area
+  g.fillStyle='#5C4020';
+  g.beginPath(); g.ellipse(19,18,5,4.5,0,0,Math.PI*2); g.fill();
+  // Googly eyes (big, white, matching reference)
+  g.fillStyle='#FFFFFF';
+  g.beginPath(); g.ellipse(12,12,4,5,0,0,Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse(21,12,3.5,4.5,0,0,Math.PI*2); g.fill();
+  g.strokeStyle='#3A2A10'; g.lineWidth=1;
+  g.beginPath(); g.ellipse(12,12,4,5,0,0,Math.PI*2); g.stroke();
+  g.beginPath(); g.ellipse(21,12,3.5,4.5,0,0,Math.PI*2); g.stroke();
+  // Pupils
+  g.fillStyle='#1A1A1A';
+  g.beginPath(); g.arc(14,13,2.2,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc(22.5,13,1.8,0,Math.PI*2); g.fill();
+  // Eye shine
+  g.fillStyle='#FFF';
+  g.beginPath(); g.arc(11,10.5,.9,0,Math.PI*2); g.fill();
+  g.beginPath(); g.arc(20,10.5,.7,0,Math.PI*2); g.fill();
+  // Tiny nose
+  g.fillStyle='#3A2A10';
+  g.beginPath(); g.ellipse(21,17,1.5,1.2,0,0,Math.PI*2); g.fill();
+  // Pink tongue
+  g.fillStyle='#DD6688';
+  g.beginPath(); g.ellipse(19,22,2.2,1.5,0,0,Math.PI*2); g.fill();
+  // Stubby legs
+  g.fillStyle='#5C4020';
+  g.fillRect(8,26,4,4); g.fillRect(20,26,4,4);
+  g.fillStyle='#C4A862';
+  g.fillRect(8,28,4,3); g.fillRect(20,28,4,3);
+  return c;
+}
+
+// ════════════ BEE SPRITES (same chunky googly-eye style) ════════════
+function drawBeeSprite(wingUp,cs){
+  const S=32,c=mkC(S,S),g=c.getContext('2d');
+  // Wings
+  g.globalAlpha=.5; g.fillStyle=cs.wing;
+  if(wingUp){
+    g.beginPath();g.ellipse(11,4,5,8,-.2,0,Math.PI*2);g.fill();
+    g.beginPath();g.ellipse(21,3,4,7,.2,0,Math.PI*2);g.fill();
+  } else {
+    g.beginPath();g.ellipse(10,10,6,4,-.4,0,Math.PI*2);g.fill();
+    g.beginPath();g.ellipse(22,10,5,3,.4,0,Math.PI*2);g.fill();
+  }
+  g.globalAlpha=1;
+  // Body (colored fill first, then stripes clipped, then thin outline)
+  g.fillStyle=cs.body;
+  g.beginPath();g.ellipse(16,18,9,8,0,0,Math.PI*2);g.fill();
+  // Stripes (clipped to body shape — no compositing bug)
+  g.save();
+  g.beginPath();g.ellipse(16,18,9,8,0,0,Math.PI*2);g.clip();
+  g.fillStyle=cs.stripe;
+  g.fillRect(7,16,18,3);g.fillRect(7,22,18,3);
+  g.restore();
+  // Thin outline
+  g.strokeStyle=BLK;g.lineWidth=1.5;
+  g.beginPath();g.ellipse(16,18,9,8,0,0,Math.PI*2);g.stroke();
+
+  // HUGE GOOGLY EYES (matching pug style!)
+  g.fillStyle=WHT;
+  g.beginPath();g.ellipse(12,14,3.5,4.5,0,0,Math.PI*2);g.fill();
+  g.beginPath();g.ellipse(20,14,3.5,4.5,0,0,Math.PI*2);g.fill();
+  g.strokeStyle=BLK;g.lineWidth=1;
+  g.beginPath();g.ellipse(12,14,3.5,4.5,0,0,Math.PI*2);g.stroke();
+  g.beginPath();g.ellipse(20,14,3.5,4.5,0,0,Math.PI*2);g.stroke();
+  // Pupils
+  g.fillStyle=BLK;
+  g.beginPath();g.arc(13,15,2,0,Math.PI*2);g.fill();
+  g.beginPath();g.arc(21,15,2,0,Math.PI*2);g.fill();
+  // Eye shine
+  g.fillStyle=WHT;
+  g.beginPath();g.arc(11.5,13,.8,0,Math.PI*2);g.fill();
+  g.beginPath();g.arc(19.5,13,.8,0,Math.PI*2);g.fill();
+
+  // Stinger
+  g.fillStyle=BLK;
+  g.beginPath();g.moveTo(16,26);g.lineTo(14,31);g.lineTo(18,31);g.closePath();g.fill();
+  g.fillStyle='#CC8800';
+  g.beginPath();g.moveTo(16,27);g.lineTo(15,30);g.lineTo(17,30);g.closePath();g.fill();
+  // Antennae
+  g.strokeStyle=BLK;g.lineWidth=2;
+  g.beginPath();g.moveTo(12,10);g.quadraticCurveTo(9,3,6,2);g.stroke();
+  g.beginPath();g.moveTo(20,10);g.quadraticCurveTo(23,3,26,2);g.stroke();
+  g.fillStyle=BLK;
+  g.beginPath();g.arc(6,2,2,0,Math.PI*2);g.fill();
+  g.beginPath();g.arc(26,2,2,0,Math.PI*2);g.fill();
+
+  return c;
+}
+
+function drawHornetSprite(wingUp,cs){
+  const S=32,c=mkC(S,S),g=c.getContext('2d');
+  // Wings (sharper)
+  g.globalAlpha=.4;g.fillStyle=cs.wing;
+  if(wingUp){
+    g.beginPath();g.ellipse(10,3,5,9,-.3,0,Math.PI*2);g.fill();
+    g.beginPath();g.ellipse(22,2,4,8,.3,0,Math.PI*2);g.fill();
+  } else {
+    g.beginPath();g.ellipse(9,10,6,4,-.5,0,Math.PI*2);g.fill();
+    g.beginPath();g.ellipse(23,10,5,3,.5,0,Math.PI*2);g.fill();
+  }
+  g.globalAlpha=1;
+  // Body (elongated, colored fill first)
+  g.fillStyle=cs.body;
+  g.beginPath();g.ellipse(16,17,8.5,9.5,0,0,Math.PI*2);g.fill();
+  // Stripes clipped to body
+  g.save();
+  g.beginPath();g.ellipse(16,17,8.5,9.5,0,0,Math.PI*2);g.clip();
+  g.fillStyle=cs.stripe;
+  g.fillRect(8,14,16,2.5);g.fillRect(8,19,16,2.5);g.fillRect(8,24,16,2);
+  g.restore();
+  // Thin outline
+  g.strokeStyle=BLK;g.lineWidth=1.5;
+  g.beginPath();g.ellipse(16,17,8.5,9.5,0,0,Math.PI*2);g.stroke();
+
+  // GOOGLY EYES with angry eyebrows
+  g.fillStyle=WHT;
+  g.beginPath();g.ellipse(12,12,3.5,4,0,0,Math.PI*2);g.fill();
+  g.beginPath();g.ellipse(20,12,3.5,4,0,0,Math.PI*2);g.fill();
+  g.strokeStyle=BLK;g.lineWidth=1;
+  g.beginPath();g.ellipse(12,12,3.5,4,0,0,Math.PI*2);g.stroke();
+  g.beginPath();g.ellipse(20,12,3.5,4,0,0,Math.PI*2);g.stroke();
+  // Angry eyebrows (thick black)
+  g.fillStyle=BLK;
+  g.beginPath();g.moveTo(8,7);g.lineTo(16,10);g.lineTo(16,8.5);g.lineTo(8,6);g.fill();
+  g.beginPath();g.moveTo(24,7);g.lineTo(16,10);g.lineTo(16,8.5);g.lineTo(24,6);g.fill();
+  // Red pupils
+  g.fillStyle='#CC0000';
+  g.beginPath();g.arc(13,12.5,2,0,Math.PI*2);g.fill();
+  g.beginPath();g.arc(21,12.5,2,0,Math.PI*2);g.fill();
+  g.fillStyle=WHT;
+  g.beginPath();g.arc(12,11.5,.7,0,Math.PI*2);g.fill();
+  g.beginPath();g.arc(20,11.5,.7,0,Math.PI*2);g.fill();
+
+  // Big stinger
+  g.fillStyle=BLK;
+  g.beginPath();g.moveTo(16,26);g.lineTo(13,32);g.lineTo(19,32);g.closePath();g.fill();
+  g.fillStyle='#AA0000';
+  g.beginPath();g.moveTo(16,27);g.lineTo(14,31);g.lineTo(18,31);g.closePath();g.fill();
+  // Antennae (angular)
+  g.strokeStyle=BLK;g.lineWidth=2;
+  g.beginPath();g.moveTo(12,8);g.lineTo(6,0);g.stroke();
+  g.beginPath();g.moveTo(20,8);g.lineTo(26,0);g.stroke();
+  g.fillStyle=cs.body;
+  g.beginPath();g.arc(6,0,2,0,Math.PI*2);g.fill();
+  g.beginPath();g.arc(26,0,2,0,Math.PI*2);g.fill();
+
+  return c;
+}
+
+function drawScaredSprite(white){
+  const S=32,c=mkC(S,S),g=c.getContext('2d');
+  const col=white?'#FFFFFF':'#4444FF', eyeC=white?'#FF2222':'#FFFFFF';
+  g.fillStyle=BLK;
+  g.beginPath();g.ellipse(16,16,12,12,0,0,Math.PI*2);g.fill();
+  g.fillStyle=col;
+  g.beginPath();g.ellipse(16,16,10,10,0,0,Math.PI*2);g.fill();
+  // Googly eyes (scared)
+  g.fillStyle=eyeC;
+  g.beginPath();g.ellipse(12,12,3,4,0,0,Math.PI*2);g.fill();
+  g.beginPath();g.ellipse(20,12,3,4,0,0,Math.PI*2);g.fill();
+  g.strokeStyle=BLK;g.lineWidth=1;
+  g.beginPath();g.ellipse(12,12,3,4,0,0,Math.PI*2);g.stroke();
+  g.beginPath();g.ellipse(20,12,3,4,0,0,Math.PI*2);g.stroke();
+  // Wavy scared mouth
+  g.strokeStyle=eyeC;g.lineWidth=2;
+  g.beginPath();g.moveTo(10,21);
+  for(let i=0;i<5;i++)g.lineTo(10+i*3,21+(i%2?-2:2));
+  g.stroke();
+  return c;
+}
+
+const BCS=[
+  {body:'#FFD700',stripe:'#6B4400',wing:'#CCDDFF',belly:'#FFE866'},
+  {body:'#66DD44',stripe:'#224400',wing:'#AAFFAA',belly:'#99FF77'}];
+const HCS=[
+  {body:'#FF4444',stripe:'#440000',wing:'#FFAAAA'},
+  {body:'#FF66FF',stripe:'#440044',wing:'#FFCCFF'}];
+
+const eSpr={};
+function buildEnemies(){
+  BCS.forEach((cs,i)=>{eSpr[`bee_${i}_0`]=drawBeeSprite(true,cs);eSpr[`bee_${i}_1`]=drawBeeSprite(false,cs)});
+  HCS.forEach((cs,i)=>{eSpr[`hornet_${i}_0`]=drawHornetSprite(true,cs);eSpr[`hornet_${i}_1`]=drawHornetSprite(false,cs)});
+  eSpr.scared=drawScaredSprite(false);eSpr.scared_w=drawScaredSprite(true);
+}
+
+// ════════════ MAZE BUFFER ════════════
+let mazeBuf;
+function buildMaze(){
+  mazeBuf=mkC(canvas.width,canvas.height);
+  const g=mazeBuf.getContext('2d');
+  g.fillStyle='#1A1206';g.fillRect(0,0,canvas.width,canvas.height);
+  function isPen(r,c){return r>=9&&r<=13&&c>=10&&c<=25&&MAP[r][c]===1}
+  function isInsideNest(r,c){
+    if(r===10 && c>=14 && c<=21) return true;
+    if(r===11 && c>=13 && c<=22) return true;
+    if(r===12 && c>=14 && c<=21) return true;
+    return false;
+  }
+  function isPond(r,c){
+    if(r<8||r>14||c<1||c>4) return false;
+    if((r===8||r===14)&&(c===1||c===4)) return false;
+    return MAP[r][c]===1;
+  }
+  function isFountain(r,c){
+    if(r<8||r>14||c<31||c>34) return false;
+    if((r===8||r===14)&&(c===31||c===34)) return false;
+    return MAP[r][c]===1;
+  }
+  let sd=42;function rng(){sd=(sd*16807)%2147483647;return sd/2147483647}
+  function drawHoneycomb(x,y,strokeColor,lwid,fillA,fillB){
+    g.strokeStyle=strokeColor;g.lineWidth=lwid;
+    for(let hx=0;hx<3;hx++) for(let hy=0;hy<3;hy++){
+      const ox=x+4+hx*7+(hy%2)*3.5,oy=y+4+hy*7;
+      g.beginPath();
+      for(let i=0;i<6;i++){const a=Math.PI/3*i-Math.PI/6;const px=ox+4*Math.cos(a),py=oy+4*Math.sin(a);i?g.lineTo(px,py):g.moveTo(px,py)}
+      g.closePath();g.stroke();
+      g.fillStyle=rng()>.5?fillA:fillB;
+      g.fill();
+    }
+  }
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const x=c*T,y=r*T;
+    if(MAP[r][c]===0||MAP[r][c]===2||MAP[r][c]===3){
+      if(MAP[r][c]===2 && isInsideNest(r,c)){
+        // Nest interior — papery warm look with honeycomb
+        g.fillStyle='#B8A070';
+        g.fillRect(x,y,T,T);
+        drawHoneycomb(x,y,'#C4A850',0.8,'rgba(210,180,100,0.3)','rgba(180,150,80,0.25)');
+        g.fillStyle='rgba(200,175,110,0.15)';g.fillRect(x,y,T,T);
+      } else {
+        // Gravel path — gray tones so pug stands out
+        g.fillStyle=rng()>.5?'#7A7A78':'#6B6B68';
+        g.fillRect(x,y,T,T);
+        // Gravel speckle texture
+        for(let i=0;i<6;i++){
+          const shade=rng()>.5?'rgba(0,0,0,0.12)':'rgba(255,255,255,0.06)';
+          g.fillStyle=shade;
+          g.fillRect(x+(rng()*T|0),y+(rng()*T|0),rng()>0.5?2:1,rng()>0.5?2:1);
+        }
+        // Occasional tiny pebble highlight
+        if(rng()>.7){g.fillStyle='rgba(200,200,195,0.15)';g.fillRect(x+(rng()*18+2|0),y+(rng()*18+2|0),3,2)}
+      }
+    } else if(MAP[r][c]===1){
+      if(isPond(r,c)){
+        // Pond — dark teal water with ripple bands
+        g.fillStyle='#2E6B6B';g.fillRect(x,y,T,T);
+        g.fillStyle='#3A8888';g.fillRect(x,y+6,T,3);
+        g.fillStyle='#48A0A0';g.fillRect(x,y+14,T,2);
+        g.fillStyle='#3A8888';g.fillRect(x,y+20,T,2);
+        // Mud border on sides facing non-pond tiles
+        const tp=r>0&&!isPond(r-1,c),bt=r<ROWS-1&&!isPond(r+1,c);
+        const lt=c>0&&!isPond(r,c-1),rt=c<COLS-1&&!isPond(r,c+1);
+        g.fillStyle='#6B5530';
+        if(tp)g.fillRect(x,y,T,3);if(bt)g.fillRect(x,y+T-3,T,3);
+        if(lt)g.fillRect(x,y,3,T);if(rt)g.fillRect(x+T-3,y,3,T);
+        // Lily pads
+        if(r===10&&c===2){g.fillStyle='#2E8B2E';g.beginPath();g.arc(x+8,y+10,4,0,Math.PI*2);g.fill();g.fillStyle='#3DA03D';g.beginPath();g.arc(x+8,y+10,2.5,0,Math.PI*2);g.fill()}
+        if(r===12&&c===3){g.fillStyle='#2E8B2E';g.beginPath();g.arc(x+14,y+16,4,0,Math.PI*2);g.fill();g.fillStyle='#3DA03D';g.beginPath();g.arc(x+14,y+16,2.5,0,Math.PI*2);g.fill()}
+        if(r===11&&c===1){g.fillStyle='#2E8B2E';g.beginPath();g.arc(x+18,y+8,3,0,Math.PI*2);g.fill();g.fillStyle='#3DA03D';g.beginPath();g.arc(x+18,y+8,2,0,Math.PI*2);g.fill()}
+      } else if(isFountain(r,c)){
+        // Fountain area — draw green hedge as backdrop; image overlaid in draw loop
+        g.fillStyle='#1B5E20';g.fillRect(x,y,T,T);
+        const leafColors=['#2E7D32','#388E3C','#256427'];
+        for(let i=0;i<4;i++){g.fillStyle=leafColors[rng()*leafColors.length|0];g.fillRect(x+(rng()*(T-4)|0),y+(rng()*(T-4)|0),3+rng()*3|0,3+rng()*3|0);}
+        const tp=r>0&&!isFountain(r-1,c),bt=r<ROWS-1&&!isFountain(r+1,c);
+        const lt=c>0&&!isFountain(r,c-1),rt=c<COLS-1&&!isFountain(r,c+1);
+        g.fillStyle='#4CAF50';
+        if(tp)g.fillRect(x,y,T,3);if(bt)g.fillRect(x,y+T-3,T,3);
+        if(lt)g.fillRect(x,y,3,T);if(rt)g.fillRect(x+T-3,y,3,T);
+      } else if(isPen(r,c)){
+        // Wasp nest walls — prominent honeycomb with papery bands
+        g.fillStyle='#8B7B60';g.fillRect(x,y,T,T);
+        // Papery horizontal bands
+        g.fillStyle='#9E8E70';
+        g.fillRect(x+1,y+2,T-2,3);g.fillRect(x+2,y+10,T-4,3);g.fillRect(x+1,y+18,T-2,3);
+        // Larger honeycomb cells with bolder stroke and alternating warm tones
+        drawHoneycomb(x,y,'#C4A850',1.2,'rgba(191,168,96,0.35)','rgba(140,115,70,0.3)');
+        // Semi-transparent papery overlay
+        g.fillStyle='rgba(160,140,100,0.15)';g.fillRect(x,y,T,T);
+        // Edge highlights where nest meets open air
+        const tp=r>0&&MAP[r-1][c]!==1,bt=r<ROWS-1&&MAP[r+1][c]!==1;
+        const lt=c>0&&MAP[r][c-1]!==1,rt=c<COLS-1&&MAP[r][c+1]!==1;
+        g.fillStyle='#C4A850';
+        if(tp)g.fillRect(x,y,T,2);if(bt)g.fillRect(x,y+T-2,T,2);
+        if(lt)g.fillRect(x,y,2,T);if(rt)g.fillRect(x+T-2,y,2,T);
+        // Darker inner edge for depth
+        g.fillStyle='rgba(60,45,20,0.4)';
+        if(tp)g.fillRect(x,y+2,T,1);if(bt)g.fillRect(x,y+T-3,T,1);
+        if(lt)g.fillRect(x+2,y,1,T);if(rt)g.fillRect(x+T-3,y,1,T);
+      } else {
+        // Bush/hedge walls — rich layered foliage
+        g.fillStyle='#1B5E20';g.fillRect(x,y,T,T);
+        // Varied leaf clusters
+        const leafColors=['#2E7D32','#388E3C','#256427','#1E6B22'];
+        for(let i=0;i<5;i++){
+          g.fillStyle=leafColors[rng()*leafColors.length|0];
+          const lw=3+rng()*4|0, lh=3+rng()*4|0;
+          g.fillRect(x+(rng()*(T-lw)|0),y+(rng()*(T-lh)|0),lw,lh);
+        }
+        // Bright edge highlights where hedge faces path
+        const tp=r>0&&MAP[r-1][c]!==1,bt=r<ROWS-1&&MAP[r+1][c]!==1;
+        const lt=c>0&&MAP[r][c-1]!==1,rt=c<COLS-1&&MAP[r][c+1]!==1;
+        g.fillStyle='#4CAF50';
+        if(tp)g.fillRect(x,y,T,3);if(bt)g.fillRect(x,y+T-3,T,3);
+        if(lt)g.fillRect(x,y,3,T);if(rt)g.fillRect(x+T-3,y,3,T);
+        g.fillStyle='#66BB6A';
+        if(tp)g.fillRect(x+2,y,T-4,1);if(lt)g.fillRect(x,y+2,1,T-4);
+        // Pixel flowers — higher chance, varied types
+        if(rng()>.6){
+          const fc=['#FF4444','#FFDD00','#FF88CC','#FFFFFF','#FF6633','#CC44FF','#44BBFF'];
+          const fCol=fc[rng()*fc.length|0];
+          const fx=x+(rng()*14+5|0),fy=y+(rng()*14+5|0);
+          g.fillStyle=fCol;
+          if(rng()>.5){
+            // Cross-shaped flower
+            g.fillRect(fx,fy-1,2,4);g.fillRect(fx-1,fy,4,2);
+            g.fillStyle='#FFE800';g.fillRect(fx,fy,2,2);
+          } else {
+            // Dot cluster flower
+            g.fillRect(fx,fy,2,2);g.fillRect(fx+2,fy+1,2,2);g.fillRect(fx+1,fy+2,2,2);
+            g.fillStyle='#FFE800';g.fillRect(fx+1,fy+1,1,1);
+          }
+        }
+        // Second flower chance for dense areas
+        if(rng()>.8){
+          const fc2=['#FF8899','#AADDFF','#FFAA44','#DDFF44'];
+          g.fillStyle=fc2[rng()*fc2.length|0];
+          const fx2=x+(rng()*12+6|0),fy2=y+(rng()*12+6|0);
+          g.fillRect(fx2,fy2,2,2);g.fillRect(fx2-1,fy2+1,1,1);g.fillRect(fx2+2,fy2+1,1,1);
+        }
+      }
+    } else if(MAP[r][c]===4){
+      // Gate — honeycomb background + gate bar on top
+      g.fillStyle='#8B7B60';g.fillRect(x,y,T,T);
+      drawHoneycomb(x,y,'#C4A850',1.0,'rgba(191,168,96,0.3)','rgba(140,115,70,0.25)');
+      // Gate bar on top
+      g.fillStyle='#8B7B60';g.fillRect(x,y+T/2-3,T,6);
+      g.fillStyle='#BFA860';g.fillRect(x,y+T/2-1,T,2);
+      g.fillStyle='#9E8E70';g.fillRect(x+2,y+T/2-2,4,4);g.fillRect(x+T-6,y+T/2-2,4,4);
+    }
+  }
+  // Stem visual above the gate (row 8, cols 16-19) — cosmetic branch
+  const stemY=8*T;
+  g.fillStyle='#6B4400';
+  g.fillRect(16*T+4,stemY+T-5,4*T-8,4);
+  g.fillStyle='#8B5E00';
+  g.fillRect(16*T+6,stemY+T-4,4*T-12,2);
+  g.fillStyle='#6B4400';
+  g.fillRect(17*T+10,stemY+T-10,3,6);
+  g.fillRect(18*T+10,stemY+T-8,3,4);
+}
+
+// ════════════ GAME STATE ════════════
+let state='start',score=0,lives=3,kibT=0,kibE=0,frame=0,beesEaten=0;
+let deathT=0,powerOn=false,powerT=0,combo=200;
+const POWER_DUR=420;
+let pugtatoFlash=0;
+let oneUpFlash=0;
+let gMap=MAP.map(r=>[...r]);
+let floats=[];
+let vic=null;
+
+function resetMap(){gMap=MAP.map(r=>[...r]);kibT=0;kibE=0;
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(gMap[r][c]===0||gMap[r][c]===3)kibT++}
+
+// ════════════ PUG ════════════
+const pug={px:0,py:0,dir:2,nd:2,fr:0,ft:0,dF:0,spd:2,lh:2};
+function resetPug(){pug.px=17*T;pug.py=18*T;pug.dir=2;pug.nd=2;pug.fr=0;pug.ft=0;pug.dF=0;pug.lh=2}
+
+// ════════════ ENEMIES ════════════
+const ED=[
+  {type:'bee',pi:0,x:17,y:11},{type:'hornet',pi:0,x:18,y:11},
+  {type:'bee',pi:1,x:17,y:10},{type:'hornet',pi:1,x:18,y:10}];
+let enemies=[];
+function resetEnemies(){
+  enemies=ED.map((d,i)=>({
+    type:d.type,pi:d.pi,hx:d.x,hy:d.y,
+    px:d.x*T,py:d.y*T,dir:i%2?0:2,spd:2,fi:0,
+    inBox:true,relT:30+i*60,scared:false,retreating:false,escaping:false}))
+}
+
+// ════════════ INPUT ════════════
+const keys={};
+const konamiSeq=['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a'];
+let konamiIdx=0;
+function sfxCheat(){aOn();[523,659,784,1047,1319,1568].forEach((f,i)=>setTimeout(()=>tone(f,.1,'square',.12),i*60));setTimeout(()=>tone(2093,.3,'square',.1),360)}
+document.addEventListener('keydown',e=>{
+  keys[e.key]=true;
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();
+  if(state==='start'){
+    if(e.key===konamiSeq[konamiIdx]||e.key.toLowerCase()===konamiSeq[konamiIdx]){konamiIdx++;
+      if(konamiIdx>=konamiSeq.length){konamiIdx=0;sfxCheat();score=9999;
+        document.getElementById('overlay').className='';document.getElementById('oC').className='';
+        setTimeout(()=>{state='victory';initVictory()},500)}
+    }else{konamiIdx=e.key===konamiSeq[0]?1:0}
+  }
+  if(e.key==='Enter'){aOn();
+    if(state==='start'){document.getElementById('overlay').className='';document.getElementById('oC').className='';startGame()}
+    if(state==='win'||state==='gameover'||state==='victory')location.reload()}
+});
+document.addEventListener('keyup',e=>{keys[e.key]=false});
+
+// ════════════ COLLISION — tighter margin so entities fill corridors ════════════
+function solidFor(c,r,isPlayer){
+  if(c<0||c>=COLS||r<0||r>=ROWS)return false;
+  if(MAP[r][c]===1)return true;
+  if(isPlayer&&MAP[r][c]===4)return true;
+  return false;
+}
+// Margin: how many px from edge count as "inside" the sprite for wall checks
+// Smaller margin = tighter fit in corridors (less wobble)
+function canGo(px,py,dir,spd,isPlayer){
+  const dx=[spd,0,-spd,0][dir],dy=[0,spd,0,-spd][dir];
+  const nx=px+dx,ny=py+dy,m=1;
+  const ck=(c,r)=>solidFor(c,r,isPlayer);
+  return !ck(Math.floor((nx+m)/T),Math.floor((ny+m)/T))
+      && !ck(Math.floor((nx+T-m-1)/T),Math.floor((ny+m)/T))
+      && !ck(Math.floor((nx+m)/T),Math.floor((ny+T-m-1)/T))
+      && !ck(Math.floor((nx+T-m-1)/T),Math.floor((ny+T-m-1)/T));
+}
+
+// ════════════ GRID-SNAPPED MOVEMENT (fixes corridor wobble) ════════════
+// When moving horizontally, snap Y to grid. When vertical, snap X.
+function snapAxis(val){
+  const rem = val % T;
+  if(rem === 0) return val;
+  if(rem <= 2) return val - rem;        // snap down if very close
+  if(T - rem <= 2) return val + (T-rem); // snap up if very close
+  return val;
+}
+
+// ════════════ PUG UPDATE ════════════
+function handleInput(){
+  if(keys.ArrowRight||keys.d||keys.D)pug.nd=0;
+  if(keys.ArrowDown||keys.s||keys.S)pug.nd=1;
+  if(keys.ArrowLeft||keys.a||keys.A)pug.nd=2;
+  if(keys.ArrowUp||keys.w||keys.W)pug.nd=3;
+}
+
+function updatePug(){
+  const s=pug.spd;
+
+  // Try to turn to desired direction
+  if(pug.nd!==pug.dir){
+    // To turn, we need to be grid-aligned on the cross-axis
+    let tx=pug.px, ty=pug.py;
+    if(pug.nd===0||pug.nd===2) ty=snapAxis(pug.py); else tx=snapAxis(pug.px);
+    if(canGo(tx,ty,pug.nd,s,true)){
+      pug.px=tx; pug.py=ty; pug.dir=pug.nd;
+    }
+  }
+
+  // Move in current direction
+  if(canGo(pug.px,pug.py,pug.dir,s,true)){
+    pug.px+=[s,0,-s,0][pug.dir];
+    pug.py+=[0,s,0,-s][pug.dir];
+    pug.ft++;if(pug.ft>=4){pug.fr=(pug.fr+1)%4;pug.ft=0}
+
+    // SNAP cross-axis to prevent wobble in corridors
+    if(pug.dir===0||pug.dir===2) pug.py=snapAxis(pug.py);
+    else pug.px=snapAxis(pug.px);
+  }
+
+  if(pug.dir===0||pug.dir===2)pug.lh=pug.dir;
+  if(pug.px<-T)pug.px=COLS*T;if(pug.px>COLS*T)pug.px=-T;
+
+  // Eat kibble
+  const col=Math.floor((pug.px+T/2)/T),row=Math.floor((pug.py+T/2)/T);
+  if(col>=0&&col<COLS&&row>=0&&row<ROWS){
+    if(gMap[row][col]===0){gMap[row][col]=2;score+=10;kibE++;sfxChomp();updHUD()}
+    else if(gMap[row][col]===3){gMap[row][col]=2;score+=50;kibE++;powerOn=true;powerT=POWER_DUR;combo=200;pugtatoFlash=90;sfxPugtato();startPugMusic();updHUD()}
+  }
+  if(kibE>=kibT){stopPugMusic();state='victory';initVictory()}
+}
+
+// ════════════ ENEMY AI ════════════
+// BFS retreat map — precompute shortest-path direction from every tile to pen entrance
+const retreatDir=[];
+function buildRetreatMap(){
+  for(let r=0;r<ROWS;r++){retreatDir[r]=new Array(COLS).fill(-1)}
+  retreatDir[8][17]=4; // target (pen entrance)
+  const q=[{x:17,y:8}];
+  const dx=[1,0,-1,0],dy=[0,1,0,-1];
+  let qi=0;
+  while(qi<q.length){
+    const{x,y}=q[qi++];
+    for(let d=0;d<4;d++){
+      const nx=x+dx[d],ny=y+dy[d];
+      if(nx<0||nx>=COLS||ny<0||ny>=ROWS)continue;
+      if(retreatDir[ny][nx]!==-1)continue;
+      if(MAP[ny][nx]===1)continue; // walls block, gates (4) passable
+      retreatDir[ny][nx]=(d+2)%4; // direction back toward pen
+      q.push({x:nx,y:ny});
+    }
+  }
+}
+
+function getTarget(e,i){
+  if(e.scared)return{x:Math.random()*COLS|0,y:Math.random()*ROWS|0};
+  const px=Math.floor(pug.px/T),py=Math.floor(pug.py/T);
+  switch(i){
+    case 0:return{x:px,y:py}; // Direct chase
+    case 1:return{x:px+[4,0,-4,0][pug.dir],y:py+[0,4,0,-4][pug.dir]}; // Ambush ahead
+    case 2:return{x:px,y:py}; // Also direct chase
+    case 3:return{x:px,y:py}; // Also direct chase
+    default:return{x:px,y:py}
+  }
+}
+
+function updateEnemy(e,idx){
+  if(e.inBox){
+    e.relT--;
+    if(e.relT<=0){
+      e.inBox=false; e.escaping=true;
+      e.px=17*T; e.py=11*T; e.dir=3;
+    } else {
+      e.py=e.hy*T+Math.sin(frame*.08)*3;
+      e.fi=(frame>>3)&1;
+    }
+    return;
+  }
+
+  if(e.escaping){
+    const spd=e.spd*1.2;
+    e.dir=3;
+    if(canGo(e.px,e.py,3,spd,false)){e.py-=spd}
+    // Snap X while escaping to stay centered
+    e.px=snapAxis(e.px);
+    if(Math.floor(e.py/T)<=8){
+      e.escaping=false;e.py=8*T;e.dir=idx%2?0:2;
+    }
+    e.fi=(frame>>3)&1;
+    return;
+  }
+
+  e.scared=powerOn&&!e.retreating;
+  // Integer speeds that divide tile size (24) evenly — prevents grid misalignment
+  const spd=e.scared?1:e.retreating?3:e.spd;
+
+  // Grid-align for direction changes
+  const gx=Math.round(e.px/T)*T, gy=Math.round(e.py/T)*T;
+  if(Math.abs(e.px-gx)<spd&&Math.abs(e.py-gy)<spd){
+    e.px=gx;e.py=gy;
+    const ex=Math.round(gx/T),ey=Math.round(gy/T);
+
+    if(e.retreating&&ex>=11&&ex<=24&&ey>=8&&ey<=13){
+      e.retreating=false;e.scared=false;e.inBox=true;e.relT=80;
+      e.px=e.hx*T;e.py=e.hy*T;return;
+    }
+
+    if(e.retreating){
+      // Use BFS map for guaranteed shortest path home
+      const rd=retreatDir[ey]&&retreatDir[ey][ex];
+      if(rd>=0&&rd<4) e.dir=rd;
+    } else {
+      const tgt=getTarget(e,idx);
+      const opp=(e.dir+2)%4;
+      let best=-1,bestD=1e9;
+      const dirs=[0,1,2,3];
+      for(let i=3;i>0;i--){const j=Math.random()*i|0;[dirs[i],dirs[j]]=[dirs[j],dirs[i]]}
+      for(const d of dirs){
+        if(d===opp&&!e.scared)continue;
+        if(!canGo(e.px,e.py,d,spd,true))continue;
+        const nx=ex+[1,0,-1,0][d],ny=ey+[0,1,0,-1][d];
+        const rawDx=Math.abs(nx-tgt.x),wrDx=COLS-rawDx;
+        const dx=Math.min(rawDx,wrDx);
+        const dist=dx*dx+(ny-tgt.y)**2;
+        if(dist<bestD){bestD=dist;best=d}
+      }
+      if(best===-1){
+        if(canGo(e.px,e.py,opp,spd,true))best=opp;
+        else best=e.dir;
+      }
+      e.dir=best;
+    }
+  }
+
+  if(canGo(e.px,e.py,e.dir,spd,!e.retreating)){
+    e.px+=[spd,0,-spd,0][e.dir];
+    e.py+=[0,spd,0,-spd][e.dir];
+    // Snap cross-axis for enemies too — prevents corridor wobble
+    if(e.dir===0||e.dir===2) e.py=snapAxis(e.py);
+    else e.px=snapAxis(e.px);
+  } else {
+    // Can't move — snap to nearest grid point so AI triggers next frame
+    e.px=gx; e.py=gy;
+  }
+  if(e.px<-T)e.px=COLS*T;if(e.px>COLS*T)e.px=-T;
+  e.fi=(frame>>3)&1;
+}
+
+// ════════════ COLLISIONS ════════════
+function checkHits(){
+  for(const e of enemies){
+    if(e.inBox||e.escaping)continue;
+    const dx=(pug.px+T/2)-(e.px+T/2),dy=(pug.py+T/2)-(e.py+T/2);
+    if(dx*dx+dy*dy<(T*.7)**2){
+      if(e.scared&&!e.retreating){
+        e.retreating=true;e.scared=false;score+=combo;combo*=2;beesEaten++;sfxEat();updHUD();
+        floats.push({x:e.px,y:e.py,text:''+(combo/2),t:40});
+        if(beesEaten%10===0){lives++;updHUD();sfxPugtato();oneUpFlash=120;floats.push({x:pug.px,y:pug.py-T,text:'+1 LIFE!',t:80})}
+      } else if(!e.retreating){
+        state='dying';deathT=80;pug.dF=0;sfxDeath();stopPugMusic();return;
+      }
+    }
+  }
+}
+
+// ════════════ GAME FLOW ════════════
+function startGame(){state='playing';score=0;lives=3;beesEaten=0;floats=[];resetMap();resetPug();resetEnemies();updHUD()}
+function updHUD(){document.getElementById('score').textContent=score;document.getElementById('lives').textContent=lives}
+function showOL(t){
+  const el=document.getElementById('oC');
+  el.innerHTML='<div class="result">'+t+'</div>';el.className='show';
+  document.getElementById('overlay').className='active';
+}
+
+// ════════════ DRAWING ════════════
+function drawKibble(){
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const v=gMap[r][c],cx=c*T+T/2,cy=r*T+T/2;
+    if(v===0){
+      // Kibble — chunky brown pellet
+      ctx.fillStyle=BLK;
+      ctx.beginPath();ctx.ellipse(cx,cy,4,3.5,.3,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#8B5E2B';
+      ctx.beginPath();ctx.ellipse(cx,cy,3,2.5,.3,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#A07035';
+      ctx.beginPath();ctx.ellipse(cx-.5,cy-.5,1.5,1,0,0,Math.PI*2);ctx.fill();
+    } else if(v===3){
+      const s=1+.2*Math.sin(frame*.12);
+      // Potato power-up!
+      ctx.fillStyle='#3A2A10';
+      ctx.beginPath();ctx.ellipse(cx,cy,7*s,5.5*s,.15,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#C4A862';
+      ctx.beginPath();ctx.ellipse(cx,cy,5.5*s,4*s,.15,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#B09850';
+      ctx.beginPath();ctx.arc(cx-2,cy-1,1,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(cx+2,cy+1,.8,0,Math.PI*2);ctx.fill();
+    }
+  }
+}
+
+function drawPugChar(){
+  const left=(pug.lh===2);
+
+  if(powerOn && state==='playing'){
+    // PUGTATO MODE — rolling potato pug!
+    const spr=pugF.tato;
+    if(!spr)return;
+    ctx.save();
+    const cx=pug.px+T/2, cy=pug.py+T/2;
+    const rollAngle=frame*0.2*(left?-1:1);
+    ctx.translate(cx,cy);ctx.rotate(rollAngle);
+    ctx.drawImage(spr,-T/2-3,-T/2-3,T+6,T+6);
+    ctx.restore();
+    return;
+  }
+
+  let spr;
+  if(state==='dying')spr=left?pugF.deadL:pugF.deadR;
+  else spr=(left?pugF.l:pugF.r)[pug.fr%4];
+  if(!spr)return;
+
+  ctx.save();
+  if(state==='dying'){
+    // Fall flat on back — pivot at feet, fast topple, slide down
+    const cx=pug.px+T/2, cy=pug.py+T;
+    const progress=Math.min(pug.dF/15,1);
+    const ang=progress*(left?Math.PI*.85:-Math.PI*.85);
+    const slideY=progress*10;
+    ctx.translate(cx,cy+slideY);ctx.rotate(ang);
+    if(pug.dF%6<3)ctx.globalAlpha=.5;
+    ctx.drawImage(spr,-T/2-2,-(T+4),T+4,T+4);
+  } else {
+    ctx.drawImage(spr,Math.round(pug.px)-2,Math.round(pug.py)-2,T+4,T+4);
+  }
+  ctx.restore();
+}
+
+function drawEnemyChars(){
+  for(const e of enemies){
+    if(e.retreating){
+      // Just floating eyes going back to pen
+      const cx=e.px+T/2,cy=e.py+T/2;
+      ctx.fillStyle=WHT;
+      ctx.beginPath();ctx.ellipse(cx-4,cy,3.5,4,0,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(cx+4,cy,3.5,4,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#22F';
+      const dd=[2,0,-2,0],ee=[0,2,0,-2];
+      ctx.beginPath();ctx.arc(cx-4+dd[e.dir],cy+ee[e.dir],1.5,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(cx+4+dd[e.dir],cy+ee[e.dir],1.5,0,Math.PI*2);ctx.fill();
+      continue;
+    }
+    let img;
+    if(e.scared){img=(powerT<120&&frame%12<6)?eSpr.scared_w:eSpr.scared}
+    else{img=eSpr[`${e.type}_${e.pi}_${e.fi}`]}
+    if(img)ctx.drawImage(img,Math.round(e.px)-2,Math.round(e.py)-2,T+4,T+4);
+  }
+}
+
+function drawFloats(){
+  ctx.font='8px "Press Start 2P",monospace';ctx.textAlign='center';
+  for(let i=floats.length-1;i>=0;i--){
+    const f=floats[i];f.y-=.8;f.t--;
+    ctx.fillStyle=`rgba(255,255,100,${f.t/40})`;ctx.fillText(f.text,f.x+T/2,f.y);
+    if(f.t<=0)floats.splice(i,1);
+  }
+}
+
+function drawLives(){
+  if(!pugF.r[0])return;
+  for(let i=0;i<lives-1;i++)ctx.drawImage(pugF.r[0],8+i*(T+6),canvas.height-T-4,T,T);
+}
+
+// ════════════ DUCK ANIMATION (pond) ════════════
+const ducks=[];
+function initDucks(){
+  for(let i=0;i<3;i++){
+    ducks.push({
+      x:1*T+8+Math.random()*(3*T-16),
+      y:9*T+Math.random()*(5*T-16),
+      dx:(Math.random()-.5)*.6,
+      dy:(Math.random()-.5)*.4,
+      dir:Math.random()>.5?1:-1,
+      bobPhase:Math.random()*Math.PI*2,
+      brown:i===2
+    });
+  }
+}
+function updateDucks(){
+  const pb={x1:1*T+6,y1:8*T+6,x2:5*T-10,y2:15*T-10};
+  for(const d of ducks){
+    d.x+=d.dx;d.y+=d.dy;d.bobPhase+=0.05;
+    if(d.x<pb.x1||d.x>pb.x2){d.dx*=-1;d.dir=-d.dir}
+    if(d.y<pb.y1||d.y>pb.y2){d.dy*=-1}
+  }
+}
+function drawDucks(){
+  for(const d of ducks){
+    const by=Math.sin(d.bobPhase)*1.5;
+    const bx=d.x,dby=d.y+by;
+    const bodyCol=d.brown?'#8B6B3A':'#FFFFFF';
+    const headCol=d.brown?'#6B4B2A':'#EEEEEE';
+    ctx.fillStyle=bodyCol;
+    ctx.fillRect(bx,dby,6,4);
+    ctx.fillStyle=headCol;
+    const hx=d.dir>0?bx+5:bx-2;
+    ctx.fillRect(hx,dby-2,3,3);
+    ctx.fillStyle='#FF8800';
+    ctx.fillRect(d.dir>0?hx+3:hx-2,dby-1,2,1);
+    ctx.fillStyle='#000';
+    ctx.fillRect(d.dir>0?hx+1:hx+1,dby-1,1,1);
+  }
+}
+
+// ════════════ FOUNTAIN ANIMATION ════════════
+const fountainParticles=[];
+const FOUNT_X=31*T, FOUNT_Y=8*T, FOUNT_W=4*T, FOUNT_H=7*T;
+function updateFountainWater(){
+  // Water arcs from pug's mouth (adjusted further down and to the right)
+  const spawnX=FOUNT_X+FOUNT_W*0.45, spawnY=FOUNT_Y+FOUNT_H*0.30;
+  if(Math.random()>.25){
+    fountainParticles.push({
+      x:spawnX+(Math.random()-0.5)*4,
+      y:spawnY+(Math.random()-0.5)*3,
+      vx:-1.5-Math.random()*1.8,
+      vy:-2.0-Math.random()*1.2,
+      life:40+(Math.random()*25|0)
+    });
+  }
+  for(let i=fountainParticles.length-1;i>=0;i--){
+    const p=fountainParticles[i];
+    p.x+=p.vx;p.y+=p.vy;p.vy+=0.09;p.life--;
+    if(p.life<=0||p.y>FOUNT_Y+FOUNT_H)fountainParticles.splice(i,1);
+  }
+}
+function drawFountain(){
+  // Draw the fountain image
+  if(fountainImg.complete&&fountainImg.naturalWidth){
+    ctx.save();
+    ctx.imageSmoothingEnabled=false;
+    // Scale image to fit fountain area, centered
+    const aspect=fountainImg.naturalWidth/fountainImg.naturalHeight;
+    let dw=FOUNT_W, dh=FOUNT_W/aspect;
+    if(dh>FOUNT_H){dh=FOUNT_H;dw=FOUNT_H*aspect}
+    const dx=FOUNT_X+(FOUNT_W-dw)/2, dy=FOUNT_Y+(FOUNT_H-dh)/2;
+    ctx.drawImage(fountainImg,Math.floor(dx),Math.floor(dy),Math.floor(dw),Math.floor(dh));
+    ctx.restore();
+  }
+  // Draw water particles (arcing from mouth to the left)
+  for(const p of fountainParticles){
+    const alpha=Math.min(1,p.life/15);
+    ctx.fillStyle=p.life>15?`rgba(68,170,255,${alpha})`:`rgba(120,210,255,${alpha})`;
+    const sz=p.life>20?3:2;
+    ctx.fillRect(p.x|0,p.y|0,sz,sz);
+  }
+}
+
+// ════════════ MAIN LOOP ════════════
+function update(){
+  frame++;
+  if(state==='playing'){
+    handleInput();updatePug();enemies.forEach((e,i)=>updateEnemy(e,i));checkHits();
+    if(powerOn){powerT--;if(powerT<=0){powerOn=false;stopPugMusic();enemies.forEach(e=>e.scared=false)}}
+  } else if(state==='dying'){
+    pug.dF++;deathT--;
+    if(deathT<=0){lives--;updHUD();
+      if(lives<=0){state='gameover';showOL('GAME OVER\n\nLost in the park!\n\nSCORE: '+score+'\n\nENTER to restart')}
+      else{state='playing';resetPug();resetEnemies();powerOn=false}}
+  } else if(state==='victory'){
+    updateVictory();
+  }
+  updateDucks();
+  updateFountainWater();
+}
+
+function draw(){
+  if(state==='victory'){drawVictory();return}
+  ctx.drawImage(mazeBuf,0,0);
+  if(state==='start')return;
+  drawDucks();drawFountain();
+  drawKibble();drawEnemyChars();
+  if(state!=='gameover')drawPugChar();
+  drawFloats();drawLives();
+  if(state==='playing'&&frame<120){
+    ctx.fillStyle='#FFD700';ctx.font='14px "Press Start 2P",monospace';ctx.textAlign='center';
+    ctx.fillText('READY!',canvas.width/2,15*T);
+  }
+  if(pugtatoFlash>0){
+    pugtatoFlash--;
+    const progress=1-pugtatoFlash/90;
+    const scale=progress<.15?progress/.15:1;
+    const alpha=pugtatoFlash>15?1:pugtatoFlash/15;
+    ctx.save();
+    ctx.globalAlpha=alpha;
+    const fs=Math.floor(32*scale);
+    ctx.font=fs+'px "Press Start 2P",monospace';
+    ctx.textAlign='center';
+    ctx.strokeStyle='#000';ctx.lineWidth=4;
+    ctx.strokeText('PUGTATO!!!',canvas.width/2,canvas.height/2+fs/3);
+    ctx.fillStyle=frame%4<2?'#FFD700':'#FF4400';
+    ctx.fillText('PUGTATO!!!',canvas.width/2,canvas.height/2+fs/3);
+    ctx.restore();
+  }
+  if(oneUpFlash>0){
+    oneUpFlash--;
+    const progress=1-oneUpFlash/120;
+    const scale=progress<.12?progress/.12:1;
+    const alpha=oneUpFlash>20?1:oneUpFlash/20;
+    ctx.save();
+    ctx.globalAlpha=alpha;
+    const fs=Math.floor(36*scale);
+    ctx.font=fs+'px "Press Start 2P",monospace';
+    ctx.textAlign='center';
+    ctx.strokeStyle='#000';ctx.lineWidth=5;
+    ctx.strokeText('1UP PUG!',canvas.width/2,canvas.height/2+fs/3);
+    ctx.fillStyle=frame%4<2?'#44FF44':'#FFFFFF';
+    ctx.fillText('1UP PUG!',canvas.width/2,canvas.height/2+fs/3);
+    ctx.restore();
+  }
+  if(powerOn&&pugtatoFlash<=0){
+    ctx.fillStyle=frame%8<4?'#FFD700':'#FF8800';ctx.font='9px "Press Start 2P",monospace';ctx.textAlign='center';
+    ctx.fillText('PUGTATO MODE!',canvas.width/2,ROWS*T-6);
+  }
+}
+
+function loop(){try{update();draw()}catch(e){console.error(e)}requestAnimationFrame(loop)}
+
+// ════════════ INIT ════════════
+buildPug();
+buildEnemies();
+// Pixelate all sprites for retro look
+pugF.r=pugF.r.map(s=>pixelate(s));pugF.l=pugF.l.map(s=>pixelate(s));
+pugF.deadR=pixelate(pugF.deadR);pugF.deadL=pixelate(pugF.deadL);
+pugF.tato=pixelate(pugF.tato);
+Object.keys(eSpr).forEach(k=>{eSpr[k]=pixelate(eSpr[k])});
+ctx.imageSmoothingEnabled=false;
+buildRetreatMap();
+buildMaze();
+initDucks();
+
+// ════════════ VICTORY ANIMATION ════════════
+function spawnConfetti(scatter){
+  const colors=['#FF3333','#33FF33','#3333FF','#FFD700','#FF33FF','#33FFFF','#FF8800','#88FF00','#FF6699','#9966FF'];
+  return{
+    x:Math.random()*canvas.width,
+    y:scatter?Math.random()*canvas.height:-Math.random()*40,
+    vy:0.5+Math.random()*2,vx:(Math.random()-0.5)*1.5,
+    w:(Math.floor(Math.random()*2)+1)*4,h:(Math.floor(Math.random()*2)+1)*4,
+    color:colors[Math.floor(Math.random()*colors.length)],
+    tw:Math.random()*Math.PI*2
+  };
+}
+
+let crownSpr=null;
+function buildCrownSprite(){
+  const W=15,H=9,m=[
+    [0,0,1,0,0,0,0,1,0,0,0,0,1,0,0],
+    [0,1,1,1,0,0,1,1,1,0,0,1,1,1,0],
+    [0,1,3,1,1,1,1,4,1,1,1,1,5,1,0],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [2,6,6,6,6,6,6,6,6,6,6,6,6,6,2],
+    [1,1,3,1,5,1,1,1,1,1,5,1,3,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,6,6,6,6,6,6,6,6,6,6,6,6,6,1],
+    [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]];
+  const c=mkC(W,H),g=c.getContext('2d');
+  const cl=['','#FFD700','#AA7700','#FF2222','#22DD22','#4444FF','#FFDD44'];
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(m[y][x]){g.fillStyle=cl[m[y][x]];g.fillRect(x,y,1,1)}
+  return c;
+}
+
+function initVictory(){
+  sfxWin();
+  if(!crownSpr)crownSpr=pixelate(buildCrownSprite(),1);
+  const aspect=bigPugImg.naturalWidth/bigPugImg.naturalHeight||0.76;
+  const pH=canvas.height*0.58,pW=pH*aspect;
+  const pX=(canvas.width-pW)/2,pY=canvas.height-pH-20;
+  const cW=pW*0.45,cH=cW*9/15;
+  vic={t:0,pX,pY,pW,pH,cW,cH,confetti:[],
+    crownY:-100,crownTgt:pY+pH*0.03,crownLanded:false,crownBV:0};
+  for(let i=0;i<80;i++)vic.confetti.push(spawnConfetti(true));
+}
+
+function updateVictory(){
+  if(!vic)return;
+  vic.t++;
+  for(const c of vic.confetti){
+    c.y+=c.vy;c.x+=c.vx+Math.sin(c.tw+vic.t*0.03)*0.3;c.tw+=0.05;
+    if(c.y>canvas.height+10)Object.assign(c,spawnConfetti(false));
+  }
+  if(vic.confetti.length<150&&vic.t%3===0)vic.confetti.push(spawnConfetti(false));
+  // Crown descent
+  if(vic.t>90&&!vic.crownLanded){
+    vic.crownY+=1.5;
+    if(vic.crownY>=vic.crownTgt){vic.crownY=vic.crownTgt;vic.crownLanded=true;vic.crownBV=-4;
+      tone(1047,.15,'square',.1);tone(1319,.15,'square',.1)}
+  }
+  if(vic.crownLanded&&Math.abs(vic.crownBV)>0.3){
+    vic.crownY+=vic.crownBV;vic.crownBV+=0.5;
+    if(vic.crownY>=vic.crownTgt){vic.crownY=vic.crownTgt;vic.crownBV=-vic.crownBV*0.35;
+      if(Math.abs(vic.crownBV)<0.5)vic.crownBV=0}
+  }
+}
+
+function drawVictory(){
+  if(!vic)return;
+  ctx.fillStyle='#1A1206';ctx.fillRect(0,0,canvas.width,canvas.height);
+  // Confetti behind pug
+  for(const c of vic.confetti){
+    ctx.fillStyle=c.color;ctx.globalAlpha=0.8+Math.sin(c.tw)*0.2;
+    ctx.fillRect(Math.floor(c.x),Math.floor(c.y),c.w,c.h);
+  }
+  ctx.globalAlpha=1;
+  // Panting bob
+  const breath=Math.sin(vic.t*0.12),bob=breath*3;
+  // BigPug image
+  ctx.save();ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(bigPugImg,Math.floor(vic.pX),Math.floor(vic.pY+bob),Math.floor(vic.pW),Math.floor(vic.pH));
+  ctx.restore();
+  // Crown (pixel art sprite)
+  if(vic.t>90||vic.crownLanded){
+    const cX=vic.pX+vic.pW*0.5-vic.cW*0.5;
+    const cY=vic.crownY+(vic.crownLanded?bob:0);
+    ctx.save();ctx.imageSmoothingEnabled=false;
+    ctx.drawImage(crownSpr,Math.floor(cX),Math.floor(cY),Math.floor(vic.cW),Math.floor(vic.cH));
+    ctx.restore();
+  }
+  // Title text rainbow shimmer
+  const fadeIn=Math.min(1,vic.t/60);
+  ctx.save();ctx.globalAlpha=fadeIn;ctx.textAlign='center';
+  const hue=(vic.t*4)%360;
+  ctx.font='13px "Press Start 2P",monospace';ctx.strokeStyle='#000';ctx.lineWidth=4;
+  ctx.strokeText('CONGRATULATIONS',canvas.width/2,38);
+  ctx.fillStyle=`hsl(${hue},100%,65%)`;ctx.fillText('CONGRATULATIONS',canvas.width/2,38);
+  ctx.font='11px "Press Start 2P",monospace';
+  ctx.strokeText('YOU ARE THE',canvas.width/2,60);
+  ctx.fillStyle=`hsl(${(hue+90)%360},100%,65%)`;ctx.fillText('YOU ARE THE',canvas.width/2,60);
+  ctx.font='32px "Press Start 2P",monospace';ctx.strokeStyle='#000';ctx.lineWidth=6;
+  ctx.strokeText('KING DOOF',canvas.width/2,102);
+  ctx.fillStyle='#FFD700';ctx.shadowColor='#FF8800';ctx.shadowBlur=12;
+  ctx.fillText('KING DOOF',canvas.width/2,102);ctx.shadowBlur=0;
+  ctx.restore();
+  // Score
+  ctx.textAlign='center';ctx.font='10px "Press Start 2P",monospace';ctx.fillStyle='#FFD700';
+  ctx.fillText('SCORE: '+score,canvas.width/2,canvas.height-45);
+  // Press ENTER blink
+  if(vic.crownLanded&&vic.t%60<40){
+    ctx.font='9px "Press Start 2P",monospace';ctx.fillStyle='#FFAA00';
+    ctx.fillText('PRESS ENTER TO RESTART',canvas.width/2,canvas.height-20);
+  }
+}
+
+loop();
+</script>
+</body>
+</html>
