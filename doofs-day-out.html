@@ -28,8 +28,6 @@
   #titlePug{width:160px;image-rendering:pixelated;image-rendering:crisp-edges;margin:10px auto;display:block;filter:drop-shadow(0 0 14px rgba(255,170,0,0.5))}
   body{touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;overscroll-behavior:none}
   canvas{touch-action:none}
-  #joystick-base{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);width:120px;height:120px;z-index:100;border-radius:50%;background:rgba(0,0,0,0.35);border:2px solid rgba(255,215,0,0.3);display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-tap-highlight-color:transparent;pointer-events:all}
-  #joystick-knob{width:50px;height:50px;border-radius:50%;background:radial-gradient(circle,rgba(255,215,0,0.6),rgba(255,170,0,0.4));border:2px solid rgba(255,215,0,0.5);box-shadow:0 0 10px rgba(255,215,0,0.3);pointer-events:none;transition:transform 0.1s ease-out}
   /* Decorative accent bars (themed dots) */
   .game-decor{display:none;width:80%;max-width:780px;height:8px;flex-shrink:0;
     background:radial-gradient(circle,#2E7D32 2px,transparent 2px);background-size:14px 8px;
@@ -45,8 +43,6 @@
     canvas { max-height: calc(100vh - 44px); width: auto !important; max-width: 95vw; height: auto !important; }
     #hud { font-size: 8px; padding: 2px 4px; }
     .game-decor { display: none; }
-    #joystick-base { bottom: 10px; width: 90px; height: 90px; }
-    #joystick-knob { width: 38px; height: 38px; }
   }
 </style>
 </head>
@@ -736,7 +732,8 @@ if (isTouchDevice || forceTouch) {
     el.textContent = el.textContent.replace('PRESS ENTER TO START', 'TAP TO START');
   });
 
-  if (controlMode === 'swipe') {
+  // Swipe controls
+  {
     let swipeStartX = 0, swipeStartY = 0;
     const SWIPE_THRESHOLD = 20;
     const MOVE_THRESHOLD = 30;
@@ -791,71 +788,9 @@ if (isTouchDevice || forceTouch) {
       }
     }, { passive: false });
 
-  } else {
-    const jBase = document.createElement('div');
-    jBase.id = 'joystick-base';
-    const jKnob = document.createElement('div');
-    jKnob.id = 'joystick-knob';
-    jBase.appendChild(jKnob);
-    document.body.appendChild(jBase);
-
-    let jActive = false, jCenterX = 0, jCenterY = 0;
-    const BASE_R = 60, KNOB_R = 25, DEAD_ZONE = 0.15;
-
-    function handleJoystickMove(tx, ty) {
-      let dx = tx - jCenterX;
-      let dy = ty - jCenterY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const maxDist = BASE_R - KNOB_R;
-      if (dist > maxDist) {
-        dx = dx / dist * maxDist;
-        dy = dy / dist * maxDist;
-      }
-      jKnob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
-      const normDist = dist / maxDist;
-      keys['ArrowUp'] = false;
-      keys['ArrowDown'] = false;
-      keys['ArrowLeft'] = false;
-      keys['ArrowRight'] = false;
-      if (normDist > DEAD_ZONE) {
-        const angle = Math.atan2(dy, dx);
-        if (angle > -Math.PI / 4 && angle <= Math.PI / 4) keys['ArrowRight'] = true;
-        else if (angle > Math.PI / 4 && angle <= 3 * Math.PI / 4) keys['ArrowDown'] = true;
-        else if (angle > -3 * Math.PI / 4 && angle <= -Math.PI / 4) keys['ArrowUp'] = true;
-        else keys['ArrowLeft'] = true;
-      }
-    }
-
-    jBase.addEventListener('touchstart', function(e) {
-      e.preventDefault();
-      jActive = true;
-      const rect = jBase.getBoundingClientRect();
-      jCenterX = rect.left + rect.width / 2;
-      jCenterY = rect.top + rect.height / 2;
-      handleJoystickMove(e.touches[0].clientX, e.touches[0].clientY);
-    }, { passive: false });
-
-    document.addEventListener('touchmove', function(e) {
-      if (!jActive) return;
-      e.preventDefault();
-      handleJoystickMove(e.touches[0].clientX, e.touches[0].clientY);
-    }, { passive: false });
-
-    document.addEventListener('touchend', function(e) {
-      if (!jActive) return;
-      jActive = false;
-      jKnob.style.transform = 'translate(0px,0px)';
-    }, { passive: false });
-
-    document.addEventListener('touchcancel', function(e) {
-      if (!jActive) return;
-      jActive = false;
-      jKnob.style.transform = 'translate(0px,0px)';
-    });
   }
 
   document.addEventListener('touchmove', function(e) {
-    if (e.target.closest('#joystick-base')) return;
     e.preventDefault();
   }, { passive: false });
 }

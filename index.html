@@ -212,36 +212,15 @@
   </div>
 
   <div class="controls-section" id="controlsSection">
-    <span class="controls-label">TOUCH CONTROLS</span>
-    <span class="controls-sublabel">(for mobile play)</span>
-    <div class="controls-btns">
-      <button class="ctrl-btn selected" id="btnGamepad" data-mode="gamepad">🎮 GAMEPAD<span class="btn-desc">Virtual joystick overlay</span></button>
-      <button class="ctrl-btn" id="btnSwipe" data-mode="swipe">👆 SWIPE<span class="btn-desc">Swipe anywhere to move</span></button>
-    </div>
+    <span class="controls-label">📱 MOBILE</span>
+    <span class="controls-sublabel">Swipe anywhere to move</span>
   </div>
 
   <footer>v1.0 — Pug Adventures</footer>
 
   <script>
-    // --- Control mode (always visible) ---
-    const isTouch = 'ontouchstart' in window;
-    let controlMode = localStorage.getItem('pugControlMode') || 'gamepad';
-
-    applyControlSelection();
-
-    function applyControlSelection() {
-      document.getElementById('btnGamepad').classList.toggle('selected', controlMode === 'gamepad');
-      document.getElementById('btnSwipe').classList.toggle('selected', controlMode === 'swipe');
-    }
-
-    document.querySelectorAll('.ctrl-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        controlMode = btn.dataset.mode;
-        localStorage.setItem('pugControlMode', controlMode);
-        applyControlSelection();
-      });
-    });
+    // --- Control mode ---
+    let controlMode = 'swipe';
 
     // --- Navigation ---
     function navigate(baseHref) {
