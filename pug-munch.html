@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Pug Munch</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
@@ -23,6 +26,15 @@
   #oC .result{color:#FFD700;font-size:18px;text-shadow:2px 2px 0 #885500;line-height:2;white-space:pre-line}
   @keyframes bl{0%,49%{opacity:1}50%,100%{opacity:0}}
   #titlePug{width:160px;image-rendering:pixelated;image-rendering:crisp-edges;margin:10px auto;display:block;filter:drop-shadow(0 0 14px rgba(255,170,0,0.5))}
+  body{touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;overscroll-behavior:none}
+  canvas{touch-action:none}
+  #joystick-base{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);width:120px;height:120px;z-index:100;border-radius:50%;background:rgba(0,0,0,0.35);border:2px solid rgba(255,215,0,0.3);display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-tap-highlight-color:transparent;pointer-events:all}
+  #joystick-knob{width:50px;height:50px;border-radius:50%;background:radial-gradient(circle,rgba(255,215,0,0.6),rgba(255,170,0,0.4));border:2px solid rgba(255,215,0,0.5);box-shadow:0 0 10px rgba(255,215,0,0.3);pointer-events:none;transition:transform 0.1s ease-out}
+  @media (max-width: 900px) {
+    canvas { max-width: 100vw; height: auto !important; }
+    #hud { max-width: 100vw; font-size: 10px; padding: 6px 4px; }
+    body { justify-content: flex-start; padding-top: 10px; }
+  }
 </style>
 </head>
 <body>
@@ -591,6 +603,151 @@ document.addEventListener('keydown',e=>{
 });
 document.addEventListener('keyup',e=>{keys[e.key]=false});
 
+// ════════════ MOBILE TOUCH CONTROLS ════════════
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+const controlMode = new URLSearchParams(window.location.search).get('controls') || localStorage.getItem('pugControlMode') || 'gamepad';
+
+const forceTouch = controlMode === 'gamepad' || controlMode === 'swipe';
+if (isTouchDevice || forceTouch) {
+  document.getElementById('overlay').addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    aOn();
+    if (state === 'start') {
+      document.getElementById('overlay').className = '';
+      document.getElementById('oC').className = '';
+      startGame();
+    }
+    if (state === 'win' || state === 'gameover' || state === 'victory') location.reload();
+  });
+
+  document.querySelectorAll('.blink').forEach(el => {
+    el.textContent = el.textContent.replace('PRESS ENTER TO START', 'TAP TO START');
+  });
+
+  if (controlMode === 'swipe') {
+    let swipeStartX = 0, swipeStartY = 0;
+    const SWIPE_THRESHOLD = 20;
+    const MOVE_THRESHOLD = 30;
+
+    document.addEventListener('touchstart', function(e) {
+      if (document.getElementById('overlay').classList.contains('active')) return;
+      const t = e.touches[0];
+      swipeStartX = t.clientX;
+      swipeStartY = t.clientY;
+      e.preventDefault();
+    }, { passive: false });
+
+    document.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+      if (document.getElementById('overlay').classList.contains('active')) return;
+      const t = e.touches[0];
+      const dx = t.clientX - swipeStartX;
+      const dy = t.clientY - swipeStartY;
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+      if (Math.max(absDx, absDy) < MOVE_THRESHOLD) return;
+      keys['ArrowUp'] = false;
+      keys['ArrowDown'] = false;
+      keys['ArrowLeft'] = false;
+      keys['ArrowRight'] = false;
+      if (absDx > absDy) {
+        keys[dx > 0 ? 'ArrowRight' : 'ArrowLeft'] = true;
+      } else {
+        keys[dy > 0 ? 'ArrowDown' : 'ArrowUp'] = true;
+      }
+    }, { passive: false });
+
+    document.addEventListener('touchend', function(e) {
+      if (document.getElementById('overlay').classList.contains('active')) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - swipeStartX;
+      const dy = t.clientY - swipeStartY;
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+
+      if (Math.max(absDx, absDy) < SWIPE_THRESHOLD) return;
+
+      keys['ArrowUp'] = false;
+      keys['ArrowDown'] = false;
+      keys['ArrowLeft'] = false;
+      keys['ArrowRight'] = false;
+
+      if (absDx > absDy) {
+        keys[dx > 0 ? 'ArrowRight' : 'ArrowLeft'] = true;
+      } else {
+        keys[dy > 0 ? 'ArrowDown' : 'ArrowUp'] = true;
+      }
+    }, { passive: false });
+
+  } else {
+    const jBase = document.createElement('div');
+    jBase.id = 'joystick-base';
+    const jKnob = document.createElement('div');
+    jKnob.id = 'joystick-knob';
+    jBase.appendChild(jKnob);
+    document.body.appendChild(jBase);
+
+    let jActive = false, jCenterX = 0, jCenterY = 0;
+    const BASE_R = 60, KNOB_R = 25, DEAD_ZONE = 0.15;
+
+    function handleJoystickMove(tx, ty) {
+      let dx = tx - jCenterX;
+      let dy = ty - jCenterY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const maxDist = BASE_R - KNOB_R;
+      if (dist > maxDist) {
+        dx = dx / dist * maxDist;
+        dy = dy / dist * maxDist;
+      }
+      jKnob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      const normDist = dist / maxDist;
+      keys['ArrowUp'] = false;
+      keys['ArrowDown'] = false;
+      keys['ArrowLeft'] = false;
+      keys['ArrowRight'] = false;
+      if (normDist > DEAD_ZONE) {
+        const angle = Math.atan2(dy, dx);
+        if (angle > -Math.PI / 4 && angle <= Math.PI / 4) keys['ArrowRight'] = true;
+        else if (angle > Math.PI / 4 && angle <= 3 * Math.PI / 4) keys['ArrowDown'] = true;
+        else if (angle > -3 * Math.PI / 4 && angle <= -Math.PI / 4) keys['ArrowUp'] = true;
+        else keys['ArrowLeft'] = true;
+      }
+    }
+
+    jBase.addEventListener('touchstart', function(e) {
+      e.preventDefault();
+      jActive = true;
+      const rect = jBase.getBoundingClientRect();
+      jCenterX = rect.left + rect.width / 2;
+      jCenterY = rect.top + rect.height / 2;
+      handleJoystickMove(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+
+    document.addEventListener('touchmove', function(e) {
+      if (!jActive) return;
+      e.preventDefault();
+      handleJoystickMove(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+
+    document.addEventListener('touchend', function(e) {
+      if (!jActive) return;
+      jActive = false;
+      jKnob.style.transform = 'translate(0px,0px)';
+    }, { passive: false });
+
+    document.addEventListener('touchcancel', function(e) {
+      if (!jActive) return;
+      jActive = false;
+      jKnob.style.transform = 'translate(0px,0px)';
+    });
+  }
+
+  document.addEventListener('touchmove', function(e) {
+    if (e.target.closest('#joystick-base')) return;
+    e.preventDefault();
+  }, { passive: false });
+}
+
 // ════════════ COLLISION — tighter margin so entities fill corridors ════════════
 function solidFor(c,r,isPlayer){
   if(c<0||c>=COLS||r<0||r>=ROWS)return false;
@@ -798,12 +955,14 @@ function checkHits(){
 }
 
 // ════════════ GAME FLOW ════════════
-function startGame(){state='playing';score=0;lives=3;beesEaten=0;floats=[];resetMap();resetPug();resetEnemies();updHUD()}
+function startGame(){state='playing';score=0;lives=3;beesEaten=0;floats=[];resetMap();resetPug();resetEnemies();updHUD();document.getElementById('menuBtn').style.display='none';const jb=document.getElementById('joystick-base');if(jb)jb.style.display='flex'}
 function updHUD(){document.getElementById('score').textContent=score;document.getElementById('lives').textContent=lives}
 function showOL(t){
   const el=document.getElementById('oC');
   el.innerHTML='<div class="result">'+t+'</div>';el.className='show';
   document.getElementById('overlay').className='active';
+  document.getElementById('menuBtn').style.display='block';
+  const jb=document.getElementById('joystick-base');if(jb)jb.style.display='none';
 }
 
 // ════════════ DRAWING ════════════
@@ -913,7 +1072,7 @@ function update(){
   } else if(state==='dying'){
     pug.dF++;deathT--;
     if(deathT<=0){lives--;updHUD();
-      if(lives<=0){state='gameover';showOL('GAME OVER\n\nStung by the swarm!\n\nSCORE: '+score+'\n\nENTER to restart')}
+      if(lives<=0){state='gameover';showOL('GAME OVER\n\nStung by the swarm!\n\nSCORE: '+score+'\n\n'+(isTouchDevice ? 'TAP to restart' : 'ENTER to restart'))}
       else{state='playing';resetPug();resetEnemies();powerOn=false}}
   } else if(state==='victory'){
     updateVictory();
@@ -1024,6 +1183,8 @@ function initVictory(){
   vic={t:0,pX,pY,pW,pH,cW,cH,confetti:[],
     crownY:-100,crownTgt:pY+pH*0.03,crownLanded:false,crownBV:0};
   for(let i=0;i<80;i++)vic.confetti.push(spawnConfetti(true));
+  document.getElementById('menuBtn').style.display='block';
+  const jb=document.getElementById('joystick-base');if(jb)jb.style.display='none';
 }
 
 function updateVictory(){
@@ -1091,11 +1252,14 @@ function drawVictory(){
   // Press ENTER blink
   if(vic.crownLanded&&vic.t%60<40){
     ctx.font='9px "Press Start 2P",monospace';ctx.fillStyle='#FFAA00';
-    ctx.fillText('PRESS ENTER TO RESTART',canvas.width/2,canvas.height-20);
+    ctx.fillText((isTouchDevice ? 'TAP TO RESTART' : 'PRESS ENTER TO RESTART'),canvas.width/2,canvas.height-20);
   }
 }
 
 loop();
 </script>
+<div id="menuBtn" style="display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;">
+  <a href="index.html" style="font-family:'Press Start 2P',monospace;font-size:10px;color:#FFAA00;text-decoration:none;padding:10px 20px;border:2px solid #FFAA00;border-radius:4px;background:rgba(0,0,0,0.7);">🏠 MENU</a>
+</div>
 </body>
 </html>
